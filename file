@@ -1,0 +1,249 @@
+package com.hashedin.huspark.model.transaction;
+
+import com.hashedin.huspark.model.User;
+import com.hashedin.huspark.model.book.Book;
+import jakarta.persistence.*;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import java.time.LocalDate;
+
+@Entity
+@Table(name = "borrowing_transactions")
+@Data
+@NoArgsConstructor
+public class BorrowingTransaction {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "book_id", nullable = false)
+    private Book book;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "member_id", nullable = false)
+    private User member;
+
+    private LocalDate borrowedDate;
+    private LocalDate dueDate;
+    private LocalDate returnedDate;
+    
+    private boolean isOverdue;
+
+    public BorrowingTransaction(Book book, User member, LocalDate borrowedDate, LocalDate dueDate) {
+        this.book = book;
+        this.member = member;
+        this.borrowedDate = borrowedDate;
+        this.dueDate = dueDate;
+        this.isOverdue = false;
+    }
+}
+
+
+
+
+
+
+
+package com.hashedin.huspark.repository;
+
+import com.hashedin.huspark.model.transaction.BorrowingTransaction;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Optional;
+
+@Repository
+public interface TransactionRepository extends JpaRepository<BorrowingTransaction, Long> {
+    Optional<BorrowingTransaction> findByBookIdAndReturnedDateIsNull(Long bookId);
+    List<BorrowingTransaction> findByMemberIdAndReturnedDateIsNull(Long memberId);
+}
+
+
+
+
+
+
+
+
+
+
+package com.hashedin.huspark.controller;
+
+import com.hashedin.huspark.model.User;
+import com.hashedin.huspark.model.book.Book;
+import com.hashedin.huspark.model.transaction.BorrowingTransaction;
+import com.hashedin.huspark.payload.response.MessageResponse;
+import com.hashedin.huspark.repository.BookRepository;
+import com.hashedin.huspark.repository.TransactionRepository;
+import com.hashedin.huspark.repository.UserRepository;
+import com.hashedin.huspark.security.services.UserDetailsImpl;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDate;
+import java.util.Optional;
+
+@CrossOrigin(origins = "*", maxAge = 3600)
+@RestController
+@RequestMapping("/api/transactions")
+@Tag(name = "Borrowing Transactions", description = "Endpoints for managing book borrowing and returning")
+public class TransactionController {
+    
+    private final TransactionRepository transactionRepository;
+    private final BookRepository bookRepository;
+    private final UserRepository userRepository;
+
+    public TransactionController(TransactionRepository transactionRepository, BookRepository bookRepository, UserRepository userRepository) {
+        this.transactionRepository = transactionRepository;
+        this.bookRepository = bookRepository;
+        this.userRepository = userRepository;
+    }
+
+    private User getCurrentUser() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
+        return userRepository.findByUsername(userDetails.getUsername()).orElseThrow(() -> new RuntimeException("User not found"));
+    }
+
+    @Operation(summary = "Borrow a book")
+    @PostMapping("/borrow/{bookId}")
+    @PreAuthorize("hasAuthority('MEMBER')")
+    public ResponseEntity<?> borrowBook(@PathVariable Long bookId) {
+        Optional<Book> bookOptional = bookRepository.findById(bookId);
+        if (bookOptional.isEmpty()) {
+            return ResponseEntity.badRequest().body(new MessageResponse("Error: Book not found!"));
+        }
+
+        Book book = bookOptional.get();
+        if (!"Available".equals(book.getAvailabilityStatus())) {
+            return ResponseEntity.badRequest().body(new MessageResponse("Error: Book is not available for borrowing."));
+        }
+
+        User currentUser = getCurrentUser();
+        // Check if the member has already borrowed this book
+        Optional<BorrowingTransaction> existingTransaction = transactionRepository.findByBookIdAndReturnedDateIsNull(bookId);
+        if (existingTransaction.isPresent() && existingTransaction.get().getMember().getId().equals(currentUser.getId())) {
+            return ResponseEntity.badRequest().body(new MessageResponse("Error: You have already borrowed this book and have not returned it."));
+        }
+        
+        book.setAvailabilityStatus("Borrowed");
+        bookRepository.save(book);
+
+        LocalDate borrowedDate = LocalDate.now();
+        LocalDate dueDate = borrowedDate.plusDays(14); // Due in 14 days
+        
+        BorrowingTransaction transaction = new BorrowingTransaction(book, currentUser, borrowedDate, dueDate);
+        transactionRepository.save(transaction);
+        
+        return ResponseEntity.ok(new MessageResponse("Book borrowed successfully!"));
+    }
+    
+    @Operation(summary = "Return a book")
+    @PostMapping("/return/{bookId}")
+    @PreAuthorize("hasAuthority('MEMBER')")
+    public ResponseEntity<?> returnBook(@PathVariable Long bookId) {
+        Optional<BorrowingTransaction> transactionOptional = transactionRepository.findByBookIdAndReturnedDateIsNull(bookId);
+        if (transactionOptional.isEmpty()) {
+            return ResponseEntity.badRequest().body(new MessageResponse("Error: This book is not currently borrowed."));
+        }
+        
+        BorrowingTransaction transaction = transactionOptional.get();
+        User currentUser = getCurrentUser();
+        if (!transaction.getMember().getId().equals(currentUser.getId())) {
+             return ResponseEntity.badRequest().body(new MessageResponse("Error: You can only return books you have borrowed."));
+        }
+        
+        transaction.setReturnedDate(LocalDate.now());
+        
+        // Check for overdue books
+        if (transaction.getReturnedDate().isAfter(transaction.getDueDate())) {
+            transaction.setOverdue(true);
+            // You can add logic for late fees here
+        }
+        transactionRepository.save(transaction);
+        
+        Book book = transaction.getBook();
+        book.setAvailabilityStatus("Available");
+        bookRepository.save(book);
+        
+        return ResponseEntity.ok(new MessageResponse("Book returned successfully!"));
+    }
+}
+
+
+
+
+
+
+
+
+
+package com.hashedin.huspark.model.book;
+
+import jakarta.persistence.*;
+import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Entity
+@Table(name = "books")
+@Data
+@NoArgsConstructor
+public class Book {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @NotBlank
+    private String title;
+    
+    @NotBlank
+    private String author;
+    
+    @NotBlank
+    private String ISBN;
+    
+    @NotBlank
+    private String barcode;
+    
+    private String availabilityStatus; // Can be "Available", "Borrowed", etc.
+}
+
+
+
+
+
+
+
+
+# Server
+server.port=8080
+
+# Database Configuration (H2 in-memory example)
+spring.h2.console.enabled=true
+spring.h2.console.path=/h2-console
+spring.datasource.url=jdbc:h2:mem:testdb
+spring.datasource.driverClassName=org.h2.Driver
+spring.datasource.username=sa
+spring.datasource.password=password
+spring.jpa.database-platform=org.hibernate.dialect.H2Dialect
+
+# Hibernate Configuration
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.format_sql=true
+
+# JWT Configuration
+library.app.jwtSecret=a_very_long_and_secure_secret_key_that_is_at_least_256_bits_long_change_this_in_production
+library.app.jwtExpirationMs=86400000
+
+# Swagger OpenAPI Configuration
+springdoc.swagger-ui.path=/swagger-ui.html
+springdoc.api-docs.path=/v3/api-docs
