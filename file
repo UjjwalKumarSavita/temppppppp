@@ -1,287 +1,77 @@
-package com.hashedin.huspark.model.transaction;
+package com.hashedin.huspark;
 
-import com.hashedin.huspark.model.User;
-import com.hashedin.huspark.model.book.Book;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
+
+@SpringBootApplication
+@EnableScheduling
+public class LibraryApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(LibraryApplication.class, args);
+    }
+}
+
+
+
+
+
+
+
+package com.hashedin.huspark.model.audit;
+
 import jakarta.persistence.*;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-import java.time.LocalDate;
+import java.time.Instant;
 
 @Entity
-@Table(name = "borrowing_transactions")
-@Data
-@NoArgsConstructor
-public class BorrowingTransaction {
+@Table(name = "audit_logs")
+public class AuditLog {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "book_id", nullable = false)
-    private Book book;
+    private String actor;
+    private String action;
+    private Instant at;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "member_id", nullable = false)
-    private User member;
+    @Lob
+    @Column(name = "details_encrypted")
+    private String detailsEncrypted;
 
-    private LocalDate borrowedDate;
-    private LocalDate dueDate;
-    private LocalDate returnedDate;
-    
-    private boolean isOverdue;
+    private String path;
+    private String method;
 
-    public BorrowingTransaction(Book book, User member, LocalDate borrowedDate, LocalDate dueDate) {
-        this.book = book;
-        this.member = member;
-        this.borrowedDate = borrowedDate;
-        this.dueDate = dueDate;
-        this.isOverdue = false;
-    }
-}
+    public AuditLog() {}
 
-
-
-
-
-
-
-package com.hashedin.huspark.repository;
-
-import com.hashedin.huspark.model.transaction.BorrowingTransaction;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
-
-import java.util.List;
-import java.util.Optional;
-
-@Repository
-public interface TransactionRepository extends JpaRepository<BorrowingTransaction, Long> {
-    Optional<BorrowingTransaction> findByBookIdAndReturnedDateIsNull(Long bookId);
-    List<BorrowingTransaction> findByMemberIdAndReturnedDateIsNull(Long memberId);
-}
-
-
-
-
-
-
-
-
-
-
-package com.hashedin.huspark.controller;
-
-import com.hashedin.huspark.model.User;
-import com.hashedin.huspark.model.book.Book;
-import com.hashedin.huspark.model.transaction.BorrowingTransaction;
-import com.hashedin.huspark.payload.response.MessageResponse;
-import com.hashedin.huspark.repository.BookRepository;
-import com.hashedin.huspark.repository.TransactionRepository;
-import com.hashedin.huspark.repository.UserRepository;
-import com.hashedin.huspark.security.services.UserDetailsImpl;
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.web.bind.annotation.*;
-
-import java.time.LocalDate;
-import java.util.Optional;
-
-@CrossOrigin(origins = "*", maxAge = 3600)
-@RestController
-@RequestMapping("/api/transactions")
-@Tag(name = "Borrowing Transactions", description = "Endpoints for managing book borrowing and returning")
-public class TransactionController {
-    
-    private final TransactionRepository transactionRepository;
-    private final BookRepository bookRepository;
-    private final UserRepository userRepository;
-
-    public TransactionController(TransactionRepository transactionRepository, BookRepository bookRepository, UserRepository userRepository) {
-        this.transactionRepository = transactionRepository;
-        this.bookRepository = bookRepository;
-        this.userRepository = userRepository;
+    public AuditLog(String actor, String action, Instant at, String detailsEncrypted, String path, String method) {
+        this.actor = actor;
+        this.action = action;
+        this.at = at;
+        this.detailsEncrypted = detailsEncrypted;
+        this.path = path;
+        this.method = method;
     }
 
-    private User getCurrentUser() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
-        return userRepository.findByUsername(userDetails.getUsername()).orElseThrow(() -> new RuntimeException("User not found"));
-    }
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
 
-    @Operation(summary = "Borrow a book")
-    @PostMapping("/borrow/{bookId}")
-    @PreAuthorize("hasAuthority('MEMBER')")
-    public ResponseEntity<?> borrowBook(@PathVariable Long bookId) {
-        Optional<Book> bookOptional = bookRepository.findById(bookId);
-        if (bookOptional.isEmpty()) {
-            return ResponseEntity.badRequest().body(new MessageResponse("Error: Book not found!"));
-        }
+    public String getActor() { return actor; }
+    public void setActor(String actor) { this.actor = actor; }
 
-        Book book = bookOptional.get();
-        if (!"Available".equals(book.getAvailabilityStatus())) {
-            return ResponseEntity.badRequest().body(new MessageResponse("Error: Book is not available for borrowing."));
-        }
+    public String getAction() { return action; }
+    public void setAction(String action) { this.action = action; }
 
-        User currentUser = getCurrentUser();
-        // Check if the member has already borrowed this book
-        Optional<BorrowingTransaction> existingTransaction = transactionRepository.findByBookIdAndReturnedDateIsNull(bookId);
-        if (existingTransaction.isPresent() && existingTransaction.get().getMember().getId().equals(currentUser.getId())) {
-            return ResponseEntity.badRequest().body(new MessageResponse("Error: You have already borrowed this book and have not returned it."));
-        }
-        
-        book.setAvailabilityStatus("Borrowed");
-        bookRepository.save(book);
+    public Instant getAt() { return at; }
+    public void setAt(Instant at) { this.at = at; }
 
-        LocalDate borrowedDate = LocalDate.now();
-        LocalDate dueDate = borrowedDate.plusDays(14); // Due in 14 days
-        
-        BorrowingTransaction transaction = new BorrowingTransaction(book, currentUser, borrowedDate, dueDate);
-        transactionRepository.save(transaction);
-        
-        return ResponseEntity.ok(new MessageResponse("Book borrowed successfully!"));
-    }
-    
-    @Operation(summary = "Return a book")
-    @PostMapping("/return/{bookId}")
-    @PreAuthorize("hasAuthority('MEMBER')")
-    public ResponseEntity<?> returnBook(@PathVariable Long bookId) {
-        Optional<BorrowingTransaction> transactionOptional = transactionRepository.findByBookIdAndReturnedDateIsNull(bookId);
-        if (transactionOptional.isEmpty()) {
-            return ResponseEntity.badRequest().body(new MessageResponse("Error: This book is not currently borrowed."));
-        }
-        
-        BorrowingTransaction transaction = transactionOptional.get();
-        User currentUser = getCurrentUser();
-        if (!transaction.getMember().getId().equals(currentUser.getId())) {
-             return ResponseEntity.badRequest().body(new MessageResponse("Error: You can only return books you have borrowed."));
-        }
-        
-        transaction.setReturnedDate(LocalDate.now());
-        
-        // Check for overdue books
-        if (transaction.getReturnedDate().isAfter(transaction.getDueDate())) {
-            transaction.setOverdue(true);
-            // You can add logic for late fees here
-        }
-        transactionRepository.save(transaction);
-        
-        Book book = transaction.getBook();
-        book.setAvailabilityStatus("Available");
-        bookRepository.save(book);
-        
-        return ResponseEntity.ok(new MessageResponse("Book returned successfully!"));
-    }
-}
+    public String getDetailsEncrypted() { return detailsEncrypted; }
+    public void setDetailsEncrypted(String detailsEncrypted) { this.detailsEncrypted = detailsEncrypted; }
 
+    public String getPath() { return path; }
+    public void setPath(String path) { this.path = path; }
 
-
-
-
-
-
-
-
-package com.hashedin.huspark.model.book;
-
-import jakarta.persistence.*;
-import jakarta.validation.constraints.NotBlank;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
-@Entity
-@Table(name = "books")
-@Data
-@NoArgsConstructor
-public class Book {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @NotBlank
-    private String title;
-    
-    @NotBlank
-    private String author;
-    
-    @NotBlank
-    private String ISBN;
-    
-    @NotBlank
-    private String barcode;
-    
-    private String availabilityStatus; // Can be "Available", "Borrowed", etc.
-}
-
-
-
-
-
-
-
-
-# Server
-server.port=8080
-
-# Database Configuration (H2 in-memory example)
-spring.h2.console.enabled=true
-spring.h2.console.path=/h2-console
-spring.datasource.url=jdbc:h2:mem:testdb
-spring.datasource.driverClassName=org.h2.Driver
-spring.datasource.username=sa
-spring.datasource.password=password
-spring.jpa.database-platform=org.hibernate.dialect.H2Dialect
-
-# Hibernate Configuration
-spring.jpa.hibernate.ddl-auto=update
-spring.jpa.show-sql=true
-spring.jpa.properties.hibernate.format_sql=true
-
-# JWT Configuration
-library.app.jwtSecret=a_very_long_and_secure_secret_key_that_is_at_least_256_bits_long_change_this_in_production
-library.app.jwtExpirationMs=86400000
-
-# Swagger OpenAPI Configuration
-springdoc.swagger-ui.path=/swagger-ui.html
-springdoc.api-docs.path=/v3/api-docs
-
-
-
-
-
-
-
-
-// last update.......
-
-
-package com.hashedin.huspark.model.book;
-
-import jakarta.persistence.*;
-import jakarta.validation.constraints.NotBlank;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
-@Entity
-@Table(name = "book_copies")
-@Data
-@NoArgsConstructor
-public class BookCopy {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-    
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "book_id", nullable = false)
-    private Book book;
-
-    @NotBlank
-    private String barcode;
-    
-    private String availabilityStatus; // Can be "Available", "Borrowed", etc.
+    public String getMethod() { return method; }
+    public void setMethod(String method) { this.method = method; }
 }
 
 
@@ -292,43 +82,135 @@ public class BookCopy {
 
 package com.hashedin.huspark.model.transaction;
 
+import com.hashedin.huspark.model.book.Book;
 import com.hashedin.huspark.model.User;
-import com.hashedin.huspark.model.book.BookCopy;
 import jakarta.persistence.*;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 import java.time.LocalDate;
 
 @Entity
 @Table(name = "borrowing_transactions")
-@Data
-@NoArgsConstructor
 public class BorrowingTransaction {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "book_copy_id", nullable = false)
-    private BookCopy bookCopy;
+    @ManyToOne(fetch = FetchType.LAZY) private Book book;
+    @ManyToOne(fetch = FetchType.LAZY) private User user;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "member_id", nullable = false)
-    private User member;
-
-    private LocalDate borrowedDate;
+    private LocalDate borrowDate;
     private LocalDate dueDate;
-    private LocalDate returnedDate;
-    
-    private boolean isOverdue;
+    private LocalDate returnDate;
+    private boolean overdueNotified = false;
 
-    public BorrowingTransaction(BookCopy bookCopy, User member, LocalDate borrowedDate, LocalDate dueDate) {
-        this.bookCopy = bookCopy;
-        this.member = member;
-        this.borrowedDate = borrowedDate;
-        this.dueDate = dueDate;
-        this.isOverdue = false;
+    public BorrowingTransaction() {}
+
+    @Transient
+    public boolean isOverdue() {
+        return returnDate == null && dueDate != null && LocalDate.now().isAfter(dueDate);
     }
+
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+
+    public Book getBook() { return book; }
+    public void setBook(Book book) { this.book = book; }
+
+    public User getUser() { return user; }
+    public void setUser(User user) { this.user = user; }
+
+    public LocalDate getBorrowDate() { return borrowDate; }
+    public void setBorrowDate(LocalDate borrowDate) { this.borrowDate = borrowDate; }
+
+    public LocalDate getDueDate() { return dueDate; }
+    public void setDueDate(LocalDate dueDate) { this.dueDate = dueDate; }
+
+    public LocalDate getReturnDate() { return returnDate; }
+    public void setReturnDate(LocalDate returnDate) { this.returnDate = returnDate; }
+
+    public boolean isOverdueNotified() { return overdueNotified; }
+    public void setOverdueNotified(boolean overdueNotified) { this.overdueNotified = overdueNotified; }
+}
+
+
+
+
+
+
+
+package com.hashedin.huspark.model;
+
+import jakarta.persistence.*;
+
+@Entity
+@Table(name = "users")
+public class User {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    private String name;
+
+    @Column(unique = true)
+    private String email;
+
+    private String passwordHash;
+
+    public User() {}
+
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
+
+    public String getPasswordHash() { return passwordHash; }
+    public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
+}
+
+
+
+
+
+
+
+package com.hashedin.huspark.payload.response;
+
+public class MaskedUserResponse {
+    private Long id;
+    private String name;
+    private String maskedEmail;
+
+    public MaskedUserResponse(Long id, String name, String maskedEmail) {
+        this.id = id;
+        this.name = name;
+        this.maskedEmail = maskedEmail;
+    }
+
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+
+    public String getMaskedEmail() { return maskedEmail; }
+    public void setMaskedEmail(String maskedEmail) { this.maskedEmail = maskedEmail; }
+}
+
+
+
+
+
+
+
+package com.hashedin.huspark.repository;
+
+import com.hashedin.huspark.model.audit.AuditLog;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {}
 }
 
 
@@ -340,18 +222,332 @@ public class BorrowingTransaction {
 package com.hashedin.huspark.repository;
 
 import com.hashedin.huspark.model.transaction.BorrowingTransaction;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
-
+import org.springframework.data.jpa.repository.Query;
+import java.time.LocalDate;
 import java.util.List;
-import java.util.Optional;
 
-@Repository
 public interface TransactionRepository extends JpaRepository<BorrowingTransaction, Long> {
-    Optional<BorrowingTransaction> findByBookCopyIdAndReturnedDateIsNull(Long bookCopyId);
-    List<BorrowingTransaction> findByMemberIdAndReturnedDateIsNull(Long memberId);
+    List<BorrowingTransaction> findByReturnDateIsNullAndDueDateBefore(LocalDate date);
+    List<BorrowingTransaction> findByReturnDateIsNullAndDueDateBeforeAndOverdueNotifiedFalse(LocalDate date);
+
+    @Query("SELECT bt.book.title, COUNT(bt.id) FROM BorrowingTransaction bt GROUP BY bt.book.title ORDER BY COUNT(bt.id) DESC")
+    List<Object[]> findMostBorrowedBooks(Pageable pageable);
 }
 
+
+
+
+
+
+
+package com.hashedin.huspark.repository;
+
+import com.hashedin.huspark.model.User;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public interface UserRepository extends JpaRepository<User, Long> {
+    Page<User> findByNameContainingIgnoreCaseOrEmailContainingIgnoreCase(String name, String email, Pageable pageable);
+}
+
+
+
+
+
+
+
+package com.hashedin.huspark.repository;
+
+import com.hashedin.huspark.model.book.Book;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public interface BookRepository extends JpaRepository<Book, Long> {
+    Page<Book> findByTitleContainingIgnoreCase(String q, Pageable pageable);
+}
+
+
+
+
+
+
+
+package com.hashedin.huspark.util;
+
+public final class MaskingUtil {
+    public static String maskEmail(String email) {
+        if (email == null || !email.contains("@")) return "****";
+        String[] parts = email.split("@", 2);
+        String local = parts[0];
+        if (local.length() <= 2) return "*" + "@" + parts[1];
+        return local.charAt(0) + "***@" + parts[1];
+    }
+}
+
+
+
+
+
+
+
+package com.hashedin.huspark.util;
+
+import javax.crypto.Cipher;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
+import java.util.Base64;
+
+public class CryptoUtil {
+    public static String encrypt(String plain, String secret) {
+        try {
+            byte[] iv = new byte[12];
+            new SecureRandom().nextBytes(iv);
+            SecretKeySpec key = new SecretKeySpec(secret.getBytes(), "AES");
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(128, iv));
+            byte[] encrypted = cipher.doFinal(plain.getBytes(StandardCharsets.UTF_8));
+            byte[] combined = new byte[iv.length + encrypted.length];
+            System.arraycopy(iv, 0, combined, 0, iv.length);
+            System.arraycopy(encrypted, 0, combined, iv.length, encrypted.length);
+            return Base64.getEncoder().encodeToString(combined);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+}
+
+
+
+
+
+
+
+package com.hashedin.huspark.config;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hashedin.huspark.model.audit.AuditLog;
+import com.hashedin.huspark.repository.AuditLogRepository;
+import com.hashedin.huspark.util.CryptoUtil;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+import org.springframework.web.servlet.HandlerInterceptor;
+
+import java.security.Principal;
+import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
+
+@Component
+public class AuditInterceptor implements HandlerInterceptor {
+    private final AuditLogRepository repo;
+    private final ObjectMapper mapper;
+
+    @Value("${audit.secret:demo-secret}")
+    private String secret;
+
+    public AuditInterceptor(AuditLogRepository repo, ObjectMapper mapper) {
+        this.repo = repo;
+        this.mapper = mapper;
+    }
+
+    @Override
+    public boolean preHandle(HttpServletRequest req, HttpServletResponse res, Object handler) throws Exception {
+        String method = req.getMethod();
+        if (!("POST".equals(method) || "PUT".equals(method) || "DELETE".equals(method))) return true;
+
+        Principal principal = req.getUserPrincipal();
+        String actor = principal != null ? principal.getName() : "anonymous";
+
+        Map<String, Object> details = new HashMap<>();
+        details.put("query", req.getQueryString());
+        details.put("ip", req.getRemoteAddr());
+
+        String json = mapper.writeValueAsString(details);
+        String encrypted = CryptoUtil.encrypt(json, secret);
+
+        AuditLog log = new AuditLog(actor, "HTTP_" + method, Instant.now(), encrypted, req.getRequestURI(), method);
+        repo.save(log);
+        return true;
+    }
+}
+
+
+
+
+
+
+
+package com.hashedin.huspark.config;
+
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+@Configuration
+public class AuditConfig implements WebMvcConfigurer {
+    private final AuditInterceptor interceptor;
+
+    public AuditConfig(AuditInterceptor interceptor) {
+        this.interceptor = interceptor;
+    }
+
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(interceptor);
+    }
+}
+
+
+
+
+
+
+
+package com.hashedin.huspark.logging;
+
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+import java.io.IOException;
+
+@Component
+public class StructuredLoggingFilter extends OncePerRequestFilter {
+    private static final Logger log = LoggerFactory.getLogger(StructuredLoggingFilter.class);
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)
+            throws IOException, jakarta.servlet.ServletException {
+        long start = System.currentTimeMillis();
+        chain.doFilter(req, res);
+        long duration = System.currentTimeMillis() - start;
+        log.info("{{\"event\":\"HTTP\",\"method\":\"{}\",\"path\":\"{}\",\"status\":{},\"duration_ms\":{}}}",
+                req.getMethod(), req.getRequestURI(), res.getStatus(), duration);
+    }
+}
+
+
+
+
+
+
+
+package com.hashedin.huspark.service;
+
+import com.hashedin.huspark.model.transaction.BorrowingTransaction;
+import com.hashedin.huspark.repository.TransactionRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+
+import java.time.LocalDate;
+import java.util.List;
+
+@Service
+public class NotificationService {
+    private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
+    private final TransactionRepository repo;
+
+    public NotificationService(TransactionRepository repo) { this.repo = repo; }
+
+    @Scheduled(cron = "0 0 9 * * *") // daily 9 AM
+    public void sendOverdueNotices() {
+        List<BorrowingTransaction> overdues = repo.findByReturnDateIsNullAndDueDateBeforeAndOverdueNotifiedFalse(LocalDate.now());
+        for (BorrowingTransaction tx : overdues) {
+            log.info("OVERDUE: user={} book={} due={}", tx.getUser().getEmail(), tx.getBook().getTitle(), tx.getDueDate());
+            tx.setOverdueNotified(true);
+        }
+    }
+}
+
+
+
+
+
+
+
+package com.hashedin.huspark.service;
+
+import com.hashedin.huspark.model.User;
+import com.hashedin.huspark.payload.response.MaskedUserResponse;
+import com.hashedin.huspark.util.MaskingUtil;
+import org.springframework.stereotype.Service;
+
+@Service
+public class UserService {
+    public MaskedUserResponse toMasked(User user) {
+        return new MaskedUserResponse(user.getId(), user.getName(), MaskingUtil.maskEmail(user.getEmail()));
+    }
+}
+
+
+
+
+
+
+
+package com.hashedin.huspark.controller;
+
+import com.hashedin.huspark.model.transaction.BorrowingTransaction;
+import com.hashedin.huspark.repository.TransactionRepository;
+import com.hashedin.huspark.service.UserService;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDate;
+import java.util.*;
+
+@RestController
+@RequestMapping("/api/reports")
+public class ReportController {
+    private final TransactionRepository txRepo;
+    private final UserService userService;
+
+    public ReportController(TransactionRepository txRepo, UserService userService) {
+        this.txRepo = txRepo; this.userService = userService;
+    }
+
+    @GetMapping("/most-borrowed")
+    public ResponseEntity<?> mostBorrowed(@RequestParam(defaultValue = "5") int top) {
+        List<Object[]> rows = txRepo.findMostBorrowedBooks(PageRequest.of(0, top));
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object[] r : rows) {
+            Map<String, Object> item = new HashMap<>();
+            item.put("title", r[0]);
+            item.put("count", r[1]);
+            result.add(item);
+        }
+        return ResponseEntity.ok(result);
+    }
+
+    @GetMapping("/overdue")
+    public ResponseEntity<?> overdue() {
+        List<BorrowingTransaction> list = txRepo.findByReturnDateIsNullAndDueDateBefore(LocalDate.now());
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (BorrowingTransaction bt : list) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("book", bt.getBook().getTitle());
+            m.put("dueDate", bt.getDueDate());
+            m.put("user", userService.toMasked(bt.getUser()));
+            result.add(m);
+        }
+        return ResponseEntity.ok(result);
+    }
+}
 
 
 
@@ -362,246 +558,40 @@ public interface TransactionRepository extends JpaRepository<BorrowingTransactio
 package com.hashedin.huspark.controller;
 
 import com.hashedin.huspark.model.User;
-import com.hashedin.huspark.model.book.BookCopy;
-import com.hashedin.huspark.model.transaction.BorrowingTransaction;
-import com.hashedin.huspark.payload.response.MessageResponse;
-import com.hashedin.huspark.repository.BookCopyRepository;
-import com.hashedin.huspark.repository.TransactionRepository;
+import com.hashedin.huspark.payload.response.MaskedUserResponse;
 import com.hashedin.huspark.repository.UserRepository;
-import com.hashedin.huspark.security.services.UserDetailsImpl;
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.tags.Tag;
+import com.hashedin.huspark.service.UserService;
+import org.springframework.data.domain.*;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDate;
-import java.util.Optional;
+import java.util.stream.Collectors;
 
-@CrossOrigin(origins = "*", maxAge = 3600)
 @RestController
-@RequestMapping("/api/transactions")
-@Tag(name = "Borrowing Transactions", description = "Endpoints for managing book borrowing and returning")
-public class TransactionController {
+@RequestMapping("/api/users")
+public class UserController {
+    private final UserRepository repo;
+    private final UserService service;
 
-    private final TransactionRepository transactionRepository;
-    private final BookCopyRepository bookCopyRepository;
-    private final UserRepository userRepository;
-
-    public TransactionController(TransactionRepository transactionRepository, BookCopyRepository bookCopyRepository, UserRepository userRepository) {
-        this.transactionRepository = transactionRepository;
-        this.bookCopyRepository = bookCopyRepository;
-        this.userRepository = userRepository;
+    public UserController(UserRepository repo, UserService service) {
+        this.repo = repo; this.service = service;
     }
 
-    private User getCurrentUser() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
-        return userRepository.findByUsername(userDetails.getUsername()).orElseThrow(() -> new RuntimeException("User not found"));
-    }
-
-    @Operation(summary = "Borrow a book copy")
-    @PostMapping("/borrow/{bookCopyId}")
-    @PreAuthorize("hasAuthority('MEMBER')")
-    public ResponseEntity<?> borrowBook(@PathVariable Long bookCopyId) {
-        try {
-            Optional<BookCopy> bookCopyOptional = bookCopyRepository.findById(bookCopyId);
-            if (bookCopyOptional.isEmpty()) {
-                return ResponseEntity.badRequest().body(new MessageResponse("Error: Book copy not found!"));
-            }
-
-            BookCopy bookCopy = bookCopyOptional.get();
-            if (!"Available".equals(bookCopy.getAvailabilityStatus())) {
-                return ResponseEntity.badRequest().body(new MessageResponse("Error: Book copy is not available for borrowing."));
-            }
-
-            User currentUser = getCurrentUser();
-            // Check if the member has already borrowed this book copy
-            Optional<BorrowingTransaction> existingTransaction = transactionRepository.findByBookCopyIdAndReturnedDateIsNull(bookCopyId);
-            if (existingTransaction.isPresent() && existingTransaction.get().getMember().getId().equals(currentUser.getId())) {
-                return ResponseEntity.badRequest().body(new MessageResponse("Error: You have already borrowed this book copy and have not returned it."));
-            }
-
-            bookCopy.setAvailabilityStatus("Borrowed");
-            bookCopyRepository.save(bookCopy);
-
-            LocalDate borrowedDate = LocalDate.now();
-            LocalDate dueDate = borrowedDate.plusDays(14); // Due in 14 days
-
-            BorrowingTransaction transaction = new BorrowingTransaction(bookCopy, currentUser, borrowedDate, dueDate);
-            transactionRepository.save(transaction);
-            
-            return ResponseEntity.ok(new MessageResponse("Book borrowed successfully!"));
-
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new MessageResponse("Error: " + e.getMessage()));
-        }
-    }
-    
-    @Operation(summary = "Return a book copy")
-    @PostMapping("/return/{bookCopyId}")
-    @PreAuthorize("hasAuthority('MEMBER')")
-    public ResponseEntity<?> returnBook(@PathVariable Long bookCopyId) {
-        try {
-            Optional<BorrowingTransaction> transactionOptional = transactionRepository.findByBookCopyIdAndReturnedDateIsNull(bookCopyId);
-            if (transactionOptional.isEmpty()) {
-                return ResponseEntity.badRequest().body(new MessageResponse("Error: This book copy is not currently borrowed."));
-            }
-
-            BorrowingTransaction transaction = transactionOptional.get();
-            User currentUser = getCurrentUser();
-            if (!transaction.getMember().getId().equals(currentUser.getId())) {
-                return ResponseEntity.badRequest().body(new MessageResponse("Error: You can only return books you have borrowed."));
-            }
-            
-            transaction.setReturnedDate(LocalDate.now());
-
-            // Check for overdue books
-            if (transaction.getReturnedDate().isAfter(transaction.getDueDate())) {
-                transaction.setOverdue(true);
-            }
-            transactionRepository.save(transaction);
-            
-            BookCopy bookCopy = transaction.getBookCopy();
-            bookCopy.setAvailabilityStatus("Available");
-            bookCopyRepository.save(bookCopy);
-            
-            return ResponseEntity.ok(new MessageResponse("Book returned successfully!"));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new MessageResponse("Error: " + e.getMessage()));
-        }
-    }
-}
-
-
-
-
-package com.hashedin.huspark.model.book;
-
-import jakarta.persistence.*;
-import jakarta.validation.constraints.NotBlank;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
-@Entity
-@Table(name = "book_copies")
-@Data
-@NoArgsConstructor
-public class BookCopy {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-    
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "book_id", nullable = false)
-    private Book book;
-
-    @NotBlank
-    private String barcode;
-    
-    private String availabilityStatus; // Can be "Available", "Borrowed", etc.
-}
-
-
-
-
-
-package com.hashedin.huspark.repository;
-
-import com.hashedin.huspark.model.book.BookCopy;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
-
-@Repository
-public interface BookCopyRepository extends JpaRepository<BookCopy, Long> {
-}
-
-
-
-
-
-package com.hashedin.huspark.payload.request;
-
-import jakarta.validation.constraints.NotBlank;
-import lombok.Data;
-
-@Data
-public class BookCopyRequest {
-    @NotBlank
-    private String barcode;
-    
-    private Long bookId;
-}
-
-
-
-
-
-package com.hashedin.huspark.controller;
-
-import com.hashedin.huspark.model.book.Book;
-import com.hashedin.huspark.model.book.BookCopy;
-import com.hashedin.huspark.payload.request.BookCopyRequest;
-import com.hashedin.huspark.payload.response.MessageResponse;
-import com.hashedin.huspark.repository.BookCopyRepository;
-import com.hashedin.huspark.repository.BookRepository;
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.validation.Valid;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
-
-@CrossOrigin(origins = "*", maxAge = 3600)
-@RestController
-@RequestMapping("/api/bookcopies")
-@Tag(name = "Book Copies", description = "Endpoints for managing individual book copies")
-public class BookCopyController {
-
-    private final BookCopyRepository bookCopyRepository;
-    private final BookRepository bookRepository;
-
-    public BookCopyController(BookCopyRepository bookCopyRepository, BookRepository bookRepository) {
-        this.bookCopyRepository = bookCopyRepository;
-        this.bookRepository = bookRepository;
-    }
-
-    @Operation(summary = "Get all book copies")
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'LIBRARIAN')")
-    public ResponseEntity<List<BookCopy>> getAllBookCopies() {
-        return ResponseEntity.ok(bookCopyRepository.findAll());
-    }
+    public ResponseEntity<Page<MaskedUserResponse>> list(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "name") String sort,
+            @RequestParam(defaultValue = "asc") String dir,
+            @RequestParam(required = false) String q) {
 
-    @Operation(summary = "Add a new book copy")
-    @PostMapping
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'LIBRARIAN')")
-    public ResponseEntity<MessageResponse> addBookCopy(@Valid @RequestBody BookCopyRequest bookCopyRequest) {
-        Book book = bookRepository.findById(bookCopyRequest.getBookId())
-            .orElseThrow(() -> new RuntimeException("Book not found with ID: " + bookCopyRequest.getBookId()));
-        
-        BookCopy bookCopy = new BookCopy();
-        bookCopy.setBook(book);
-        bookCopy.setBarcode(bookCopyRequest.getBarcode());
-        bookCopy.setAvailabilityStatus("Available");
-        
-        bookCopyRepository.save(bookCopy);
-        
-        return ResponseEntity.status(HttpStatus.CREATED).body(new MessageResponse("Book copy added successfully!"));
-    }
+        Pageable pageable = PageRequest.of(page, size, Sort.by("desc".equalsIgnoreCase(dir) ? Sort.Direction.DESC : Sort.Direction.ASC, sort));
+        Page<User> users = (q == null) ? repo.findAll(pageable) : repo.findByNameContainingIgnoreCaseOrEmailContainingIgnoreCase(q, q, pageable);
 
-    @Operation(summary = "Delete a book copy by ID")
-    @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'LIBRARIAN')")
-    public ResponseEntity<MessageResponse> deleteBookCopy(@PathVariable Long id) {
-        return bookCopyRepository.findById(id).map(bookCopy -> {
-            bookCopyRepository.delete(bookCopy);
-            return ResponseEntity.ok(new MessageResponse("Book copy deleted successfully!"));
-        }).orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).body(new MessageResponse("Book copy not found!")));
+        return ResponseEntity.ok(new PageImpl<>(
+                users.getContent().stream().map(service::toMasked).collect(Collectors.toList()),
+                pageable,
+                users.getTotalElements()
+        ));
     }
 }
