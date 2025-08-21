@@ -247,3 +247,361 @@ library.app.jwtExpirationMs=86400000
 # Swagger OpenAPI Configuration
 springdoc.swagger-ui.path=/swagger-ui.html
 springdoc.api-docs.path=/v3/api-docs
+
+
+
+
+
+
+
+
+// last update.......
+
+
+package com.hashedin.huspark.model.book;
+
+import jakarta.persistence.*;
+import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Entity
+@Table(name = "book_copies")
+@Data
+@NoArgsConstructor
+public class BookCopy {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "book_id", nullable = false)
+    private Book book;
+
+    @NotBlank
+    private String barcode;
+    
+    private String availabilityStatus; // Can be "Available", "Borrowed", etc.
+}
+
+
+
+
+
+
+
+package com.hashedin.huspark.model.transaction;
+
+import com.hashedin.huspark.model.User;
+import com.hashedin.huspark.model.book.BookCopy;
+import jakarta.persistence.*;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import java.time.LocalDate;
+
+@Entity
+@Table(name = "borrowing_transactions")
+@Data
+@NoArgsConstructor
+public class BorrowingTransaction {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "book_copy_id", nullable = false)
+    private BookCopy bookCopy;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "member_id", nullable = false)
+    private User member;
+
+    private LocalDate borrowedDate;
+    private LocalDate dueDate;
+    private LocalDate returnedDate;
+    
+    private boolean isOverdue;
+
+    public BorrowingTransaction(BookCopy bookCopy, User member, LocalDate borrowedDate, LocalDate dueDate) {
+        this.bookCopy = bookCopy;
+        this.member = member;
+        this.borrowedDate = borrowedDate;
+        this.dueDate = dueDate;
+        this.isOverdue = false;
+    }
+}
+
+
+
+
+
+
+
+package com.hashedin.huspark.repository;
+
+import com.hashedin.huspark.model.transaction.BorrowingTransaction;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Optional;
+
+@Repository
+public interface TransactionRepository extends JpaRepository<BorrowingTransaction, Long> {
+    Optional<BorrowingTransaction> findByBookCopyIdAndReturnedDateIsNull(Long bookCopyId);
+    List<BorrowingTransaction> findByMemberIdAndReturnedDateIsNull(Long memberId);
+}
+
+
+
+
+
+
+
+
+package com.hashedin.huspark.controller;
+
+import com.hashedin.huspark.model.User;
+import com.hashedin.huspark.model.book.BookCopy;
+import com.hashedin.huspark.model.transaction.BorrowingTransaction;
+import com.hashedin.huspark.payload.response.MessageResponse;
+import com.hashedin.huspark.repository.BookCopyRepository;
+import com.hashedin.huspark.repository.TransactionRepository;
+import com.hashedin.huspark.repository.UserRepository;
+import com.hashedin.huspark.security.services.UserDetailsImpl;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDate;
+import java.util.Optional;
+
+@CrossOrigin(origins = "*", maxAge = 3600)
+@RestController
+@RequestMapping("/api/transactions")
+@Tag(name = "Borrowing Transactions", description = "Endpoints for managing book borrowing and returning")
+public class TransactionController {
+
+    private final TransactionRepository transactionRepository;
+    private final BookCopyRepository bookCopyRepository;
+    private final UserRepository userRepository;
+
+    public TransactionController(TransactionRepository transactionRepository, BookCopyRepository bookCopyRepository, UserRepository userRepository) {
+        this.transactionRepository = transactionRepository;
+        this.bookCopyRepository = bookCopyRepository;
+        this.userRepository = userRepository;
+    }
+
+    private User getCurrentUser() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
+        return userRepository.findByUsername(userDetails.getUsername()).orElseThrow(() -> new RuntimeException("User not found"));
+    }
+
+    @Operation(summary = "Borrow a book copy")
+    @PostMapping("/borrow/{bookCopyId}")
+    @PreAuthorize("hasAuthority('MEMBER')")
+    public ResponseEntity<?> borrowBook(@PathVariable Long bookCopyId) {
+        try {
+            Optional<BookCopy> bookCopyOptional = bookCopyRepository.findById(bookCopyId);
+            if (bookCopyOptional.isEmpty()) {
+                return ResponseEntity.badRequest().body(new MessageResponse("Error: Book copy not found!"));
+            }
+
+            BookCopy bookCopy = bookCopyOptional.get();
+            if (!"Available".equals(bookCopy.getAvailabilityStatus())) {
+                return ResponseEntity.badRequest().body(new MessageResponse("Error: Book copy is not available for borrowing."));
+            }
+
+            User currentUser = getCurrentUser();
+            // Check if the member has already borrowed this book copy
+            Optional<BorrowingTransaction> existingTransaction = transactionRepository.findByBookCopyIdAndReturnedDateIsNull(bookCopyId);
+            if (existingTransaction.isPresent() && existingTransaction.get().getMember().getId().equals(currentUser.getId())) {
+                return ResponseEntity.badRequest().body(new MessageResponse("Error: You have already borrowed this book copy and have not returned it."));
+            }
+
+            bookCopy.setAvailabilityStatus("Borrowed");
+            bookCopyRepository.save(bookCopy);
+
+            LocalDate borrowedDate = LocalDate.now();
+            LocalDate dueDate = borrowedDate.plusDays(14); // Due in 14 days
+
+            BorrowingTransaction transaction = new BorrowingTransaction(bookCopy, currentUser, borrowedDate, dueDate);
+            transactionRepository.save(transaction);
+            
+            return ResponseEntity.ok(new MessageResponse("Book borrowed successfully!"));
+
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(new MessageResponse("Error: " + e.getMessage()));
+        }
+    }
+    
+    @Operation(summary = "Return a book copy")
+    @PostMapping("/return/{bookCopyId}")
+    @PreAuthorize("hasAuthority('MEMBER')")
+    public ResponseEntity<?> returnBook(@PathVariable Long bookCopyId) {
+        try {
+            Optional<BorrowingTransaction> transactionOptional = transactionRepository.findByBookCopyIdAndReturnedDateIsNull(bookCopyId);
+            if (transactionOptional.isEmpty()) {
+                return ResponseEntity.badRequest().body(new MessageResponse("Error: This book copy is not currently borrowed."));
+            }
+
+            BorrowingTransaction transaction = transactionOptional.get();
+            User currentUser = getCurrentUser();
+            if (!transaction.getMember().getId().equals(currentUser.getId())) {
+                return ResponseEntity.badRequest().body(new MessageResponse("Error: You can only return books you have borrowed."));
+            }
+            
+            transaction.setReturnedDate(LocalDate.now());
+
+            // Check for overdue books
+            if (transaction.getReturnedDate().isAfter(transaction.getDueDate())) {
+                transaction.setOverdue(true);
+            }
+            transactionRepository.save(transaction);
+            
+            BookCopy bookCopy = transaction.getBookCopy();
+            bookCopy.setAvailabilityStatus("Available");
+            bookCopyRepository.save(bookCopy);
+            
+            return ResponseEntity.ok(new MessageResponse("Book returned successfully!"));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(new MessageResponse("Error: " + e.getMessage()));
+        }
+    }
+}
+
+
+
+
+package com.hashedin.huspark.model.book;
+
+import jakarta.persistence.*;
+import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Entity
+@Table(name = "book_copies")
+@Data
+@NoArgsConstructor
+public class BookCopy {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "book_id", nullable = false)
+    private Book book;
+
+    @NotBlank
+    private String barcode;
+    
+    private String availabilityStatus; // Can be "Available", "Borrowed", etc.
+}
+
+
+
+
+
+package com.hashedin.huspark.repository;
+
+import com.hashedin.huspark.model.book.BookCopy;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+@Repository
+public interface BookCopyRepository extends JpaRepository<BookCopy, Long> {
+}
+
+
+
+
+
+package com.hashedin.huspark.payload.request;
+
+import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
+
+@Data
+public class BookCopyRequest {
+    @NotBlank
+    private String barcode;
+    
+    private Long bookId;
+}
+
+
+
+
+
+package com.hashedin.huspark.controller;
+
+import com.hashedin.huspark.model.book.Book;
+import com.hashedin.huspark.model.book.BookCopy;
+import com.hashedin.huspark.payload.request.BookCopyRequest;
+import com.hashedin.huspark.payload.response.MessageResponse;
+import com.hashedin.huspark.repository.BookCopyRepository;
+import com.hashedin.huspark.repository.BookRepository;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@CrossOrigin(origins = "*", maxAge = 3600)
+@RestController
+@RequestMapping("/api/bookcopies")
+@Tag(name = "Book Copies", description = "Endpoints for managing individual book copies")
+public class BookCopyController {
+
+    private final BookCopyRepository bookCopyRepository;
+    private final BookRepository bookRepository;
+
+    public BookCopyController(BookCopyRepository bookCopyRepository, BookRepository bookRepository) {
+        this.bookCopyRepository = bookCopyRepository;
+        this.bookRepository = bookRepository;
+    }
+
+    @Operation(summary = "Get all book copies")
+    @GetMapping
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'LIBRARIAN')")
+    public ResponseEntity<List<BookCopy>> getAllBookCopies() {
+        return ResponseEntity.ok(bookCopyRepository.findAll());
+    }
+
+    @Operation(summary = "Add a new book copy")
+    @PostMapping
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'LIBRARIAN')")
+    public ResponseEntity<MessageResponse> addBookCopy(@Valid @RequestBody BookCopyRequest bookCopyRequest) {
+        Book book = bookRepository.findById(bookCopyRequest.getBookId())
+            .orElseThrow(() -> new RuntimeException("Book not found with ID: " + bookCopyRequest.getBookId()));
+        
+        BookCopy bookCopy = new BookCopy();
+        bookCopy.setBook(book);
+        bookCopy.setBarcode(bookCopyRequest.getBarcode());
+        bookCopy.setAvailabilityStatus("Available");
+        
+        bookCopyRepository.save(bookCopy);
+        
+        return ResponseEntity.status(HttpStatus.CREATED).body(new MessageResponse("Book copy added successfully!"));
+    }
+
+    @Operation(summary = "Delete a book copy by ID")
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'LIBRARIAN')")
+    public ResponseEntity<MessageResponse> deleteBookCopy(@PathVariable Long id) {
+        return bookCopyRepository.findById(id).map(bookCopy -> {
+            bookCopyRepository.delete(bookCopy);
+            return ResponseEntity.ok(new MessageResponse("Book copy deleted successfully!"));
+        }).orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).body(new MessageResponse("Book copy not found!")));
+    }
+}
