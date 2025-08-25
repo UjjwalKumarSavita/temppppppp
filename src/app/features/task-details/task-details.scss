@@ -1,0 +1,6 @@
+.p{ padding:22px; }
+.head{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+.head .badges{ display:flex; gap:.4rem; flex-wrap:wrap; }
+.desc{ color: var(--text); line-height: 1.55; }
+.meta{ display:flex; gap:1rem; }
+.actions{ display:flex; gap:.5rem; margin-top: 12px; flex-wrap: wrap; }

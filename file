@@ -1,8 +1,0 @@
-feat(shelfsecure): implement milestones 1-5 (foundation, RBAC, transactions, auditing, reporting, security)
-
-- Milestone 1: Project setup, Swagger docs, user data modeling, JWT-based auth
-- Milestone 2: Book catalog schema, CRUD with RBAC (MEMBER, LIBRARIAN, ADMIN)
-- Milestone 3: Borrowing & returning flow, transaction schema, integrity checks
-- Milestone 3.3: Encryption of sensitive member data
-- Milestone 4: Advanced API querying (pagination, search, sort), system audit trail, overdue notifications
-- Milestone 5: Structured logging & actuator monitoring, reporting endpoints, response data masking

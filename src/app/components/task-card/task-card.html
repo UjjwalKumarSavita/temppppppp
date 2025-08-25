@@ -1,0 +1,21 @@
+<div class="card task">
+  <div class="row">
+    <div class="left">
+      <a [routerLink]="['/task', task.id]" class="title">{{ task.title }}</a>
+      <p class="desc">{{ task.description }}</p>
+      <div class="meta">
+        <app-priority-badge [priority]="task.priority"></app-priority-badge>
+        <app-status-badge [status]="task.status"></app-status-badge>
+        <span class="badge">📅 {{ task.dueDate }}</span>
+      </div>
+    </div>
+
+    <div class="right">
+      <button class="btn" (click)="setStatus.emit('pending')">Set Pending</button>
+      <button class="btn primary" (click)="setStatus.emit('in-progress')">In Progress</button>
+      <button class="btn success" (click)="setStatus.emit('completed')">Complete</button>
+      <button class="btn danger" (click)="remove.emit()">Delete</button>
+      <a [routerLink]="['/task', task.id]" class="btn ghost">Open</a>
+    </div>
+  </div>
+</div>

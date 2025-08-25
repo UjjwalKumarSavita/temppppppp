@@ -1,0 +1,36 @@
+<section class="panel p">
+  <div class="head">
+    <p class="muted">Create and organizie your task efficiently.</p>
+  </div>
+
+  <div class="grid cols-2">
+    <div>
+      <label>Task Title *</label>
+      <input class="input" [(ngModel)]="title" placeholder="Enter task title..." />
+    </div>
+
+    <div>
+      <label>Due Date *</label>
+      <input class="input" type="date" [(ngModel)]="dueDate" />
+    </div>
+
+    <div class="col-span">
+      <label>Description</label>
+      <textarea rows="4" [(ngModel)]="description" placeholder="Add task description..." ></textarea>
+    </div>
+
+    <div>
+      <label>Priority</label>
+      <select class="input" [(ngModel)]="priority">
+        <option value="low">Low Priority</option>
+        <option value="medium">Medium Priority</option>
+        <option value="high">High Priority</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn primary" (click)="create()">Create Task</button>
+    <a class="btn" routerLink="/dashboard">View Dashboard</a>
+  </div>
+</section>

@@ -1,0 +1,35 @@
+<section class="panel p" *ngIf="task; else notfound">
+  <header class="head">
+    <button class="btn ghost" (click)="goBack()">⬅ Back</button>
+    <h1>{{ task?.title }}</h1>
+    <div class="badges">
+      <app-priority-badge [priority]="task!.priority"></app-priority-badge>
+      <app-status-badge [status]="task!.status"></app-status-badge>
+      <span class="badge">Due: {{ task?.dueDate }}</span>
+    </div>
+  </header>
+
+  <p class="desc">{{ task?.description || 'No description provided.' }}</p>
+
+  <hr />
+
+  <div class="meta">
+    <small class="muted">Created: {{ task?.createdAt }}</small>
+    <small class="muted">Updated: {{ task?.updatedAt }}</small>
+  </div>
+
+  <div class="actions">
+    <button class="btn" (click)="setStatus('pending')">Set Pending</button>
+    <button class="btn primary" (click)="setStatus('in-progress')">In Progress</button>
+    <button class="btn success" (click)="setStatus('completed')">Complete</button>
+    <button class="btn danger" (click)="remove()">Delete</button>
+    <a class="btn ghost" routerLink="/dashboard">Back to Dashboard</a>
+  </div>
+</section>
+
+<ng-template #notfound>
+  <section class="panel p">
+    <p class="muted">Task not found.</p>
+    <a class="btn" routerLink="/dashboard">Back to Dashboard</a>
+  </section>
+</ng-template>

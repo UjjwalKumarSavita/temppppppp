@@ -1,0 +1,9 @@
+.task .row{ display:flex; gap:14px; justify-content:space-between; }
+.task .title{ font-weight:600; font-size:1.05rem; }
+.task .desc{ color: var(--muted); margin:.2rem 0 .5rem; }
+.task .meta{ display:flex; gap:.4rem; align-items:center; flex-wrap:wrap; }
+.task .right{ display:flex; gap:.4rem; flex-wrap:wrap; justify-content:flex-end; }
+@media (max-width: 720px){
+  .task .row{ flex-direction:column; }
+  .task .right{ justify-content:flex-start; }
+}
