@@ -1,0 +1,5 @@
+[
+  {"name": "AM-GM Inequality", "statement": "For nonnegative a,b, (a+b)/2 >= sqrt(ab)", "keywords": ["am-gm","am gm","inequality","arithmetic geometric"]},
+  {"name": "Quadratic Formula", "statement": "For ax^2+bx+c=0, x=(−b±√(b^2−4ac))/(2a)", "keywords": ["quadratic","discriminant","roots"]},
+  {"name": "Binomial Theorem", "statement": "(x+y)^n=∑ C(n,k)x^ky^{n−k}", "keywords": ["binomial","combination"]}
+]
